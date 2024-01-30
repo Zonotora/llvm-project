@@ -4503,9 +4503,31 @@ Value *ScalarExprEmitter::VisitBinAssign(const BinaryOperator *E) {
     break;
 
   case Qualifiers::OCL_None:
+    Value *Previous;
+    bool Visited = false;
+    if (E->getRHS()->refersToBitField()) {
+      // Check if there is an implicit conversion, and visit the sub expr,
+      // then emit scalar conversion with bitfield information
+      if (auto *ICE = dyn_cast<ImplicitCastExpr>(E->getRHS())) {
+        CastKind Kind = ICE->getCastKind();
+        if (Kind == CK_IntegralCast) {
+          QualType SrcType = ICE->getSubExpr()->getType();
+          QualType DstType = ICE->getType();
+          Previous = Visit(ICE->getSubExpr());
+          // Pass default ScalarConversionOpts so that sanitizer check is
+          // not emitted here
+          RHS = EmitScalarConversion(Previous, SrcType, DstType, ICE->getExprLoc());
+          Visited = true;
+        }
+      }
+    }
+
     // __block variables need to have the rhs evaluated first, plus
     // this should improve codegen just a little.
-    RHS = Visit(E->getRHS());
+    if (!Visited) {
+      RHS = Visit(E->getRHS());
+    }
+
     LHS = EmitCheckedLValue(E->getLHS(), CodeGenFunction::TCK_Store);
 
     // Store the value into the LHS.  Bit-fields are handled specially
